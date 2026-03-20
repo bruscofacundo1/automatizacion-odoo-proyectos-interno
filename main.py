@@ -38,7 +38,6 @@ with col1:
     if json_input:
         try:
             data = json.loads(json_input)
-            # Validamos que sea el JSON nuevo que tiene "target_project"
             if "target_project" in data:
                 st.markdown('<p class="success-text">✓ Estructura JSON validada correctamente</p>', unsafe_allow_html=True)
                 with st.expander("Ver Resumen a Cargar", expanded=True):
@@ -71,7 +70,6 @@ with col2:
                     cliente_nombre = data.get('target_project')
                     status.text(f"Buscando cliente '{cliente_nombre}'...")
                     
-                    # ---> MAGIA 1: BUSCAR EL PROYECTO (CLIENTE) EN VEZ DE CREARLO <---
                     project_ids = models.execute_kw(DB, uid, API_KEY, 'project.project', 'search', [[('name', '=', cliente_nombre)]])
                     
                     if not project_ids:
@@ -80,14 +78,11 @@ with col2:
                         proyecto_id = project_ids[0]
                         status.text(f"¡Cliente encontrado! Preparando inyección...")
                         
-                        # Preparar variables para Actividades (Chatter)
                         model_id = models.execute_kw(DB, uid, API_KEY, 'ir.model', 'search', [[('model', '=', 'project.task')]])[0]
                         act_types = models.execute_kw(DB, uid, API_KEY, 'mail.activity.type', 'search', [[]])
                         act_type_id = act_types[0] if act_types else 1
 
-                        # Diccionario para no buscar la misma etapa varias veces
                         stage_map = {}
-
                         tasks = data.get('tasks', [])
                         total_tasks = len(tasks)
                         
@@ -104,15 +99,18 @@ with col2:
                                     new_tag = models.execute_kw(DB, uid, API_KEY, 'project.tags', 'create', [{'name': tag_name}])
                                     tag_ids.append(new_tag)
                             
-                            # 2. Descripción con Responsable
+                            # 2. Descripción
                             desc_html = f"<p>{task.get('description', '')}</p>"
                             if task.get('responsible'):
                                 desc_html += f"<p><strong style='color: #004a99;'>👤 Responsable designado:</strong> {task.get('responsible')}</p>"
                             
-                            # 3. Buscar la Etapa (Stage) exacta ("En desarrollo")
+                            # 3. ---> BÚSQUEDA DE ETAPA CORREGIDA (Solo en este proyecto) <---
                             stage_name = task.get('stage', 'En desarrollo')
                             if stage_name not in stage_map:
-                                stage_search = models.execute_kw(DB, uid, API_KEY, 'project.task.type', 'search', [[('name', '=', stage_name)]])
+                                # Le exigimos a Odoo que la etapa pertenezca a este proyecto específico
+                                stage_search = models.execute_kw(DB, uid, API_KEY, 'project.task.type', 'search', [
+                                    [('name', '=', stage_name), ('project_ids', 'in', [proyecto_id])]
+                                ])
                                 if stage_search:
                                     stage_map[stage_name] = stage_search[0]
                             
@@ -125,11 +123,10 @@ with col2:
                                 'tag_ids': [(6, 0, tag_ids)] if tag_ids else []
                             }
                             
-                            # Asignar a la Etapa si se encontró en Odoo
+                            # Asignamos la etapa SOLO si la encontramos
                             if stage_name in stage_map:
                                 task_data['stage_id'] = stage_map[stage_name]
                                 
-                            # ¡Crear Tarea adentro del Cliente!
                             tarea_id = models.execute_kw(DB, uid, API_KEY, 'project.task', 'create', [task_data])
                             
                             # 4. Crear Subtareas
@@ -155,7 +152,6 @@ with col2:
                         
                         status.success("¡Inyección completada con éxito!")
                         st.balloons()
-                        # Link directo para ver el proyecto del cliente actualizado
                         st.link_button("Ver Tablero del Cliente", f"{URL}/web#model=project.project&id={proyecto_id}&view_type=kanban")
             
             except Exception as e:
